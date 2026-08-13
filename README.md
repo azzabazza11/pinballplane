@@ -1,10 +1,18 @@
 # Pinball Plane
 
-2D pinball playground — physics first, theme later. Browser-only, GitHub Pages friendly.
+2D pinball playground for the phone — open in Chrome, then **Install** / Add to Home Screen. Tilt, edit, tweak physics. No account.
 
 ## Live
 
-(once Pages is on): https://azzabazza11.github.io/pinballplane/
+- **Open / install on mobile:** https://azzabazza11.github.io/pinballplane/
+- **Apps hub:** https://azzabazza11.github.io/
+- Deep-link install nudge: https://azzabazza11.github.io/pinballplane/?install=1
+
+## Install on Android
+
+1. Open the live link in Chrome
+2. Tap **Install** (or Chrome menu → Install app / Add to Home screen)
+3. Launch from your home screen like any app — works offline after first load
 
 ## Local
 
@@ -25,6 +33,7 @@ Open http://localhost:8080/
 - **Edit mode** — drag wall endpoints / bumpers / flipper pivots; add wall, sling, bumper; delete; save to localStorage; reset default (`E` or Edit button)
 - **Physics panel** — table angle, gravity, bounce, friction, drag, ball size, bumper/sling/flipper/plunger power, tilt gain, max speed (saved)
 - **Themes** — `assets/themes/default` (AI playfield + sprites) and `classic` (wire look); **Theme** button cycles; **Guide PNG** in Edit exports collision wireframe for AI backdrops
+- **PWA** — service worker, install button, portrait standalone display
 
 ## Art pipeline
 
@@ -39,4 +48,4 @@ Open http://localhost:8080/
 - More bumper / target / ramp toys
 - Drain multiball / rules skeleton
 - Export / import table JSON + share link
-- GitHub Pages + share QR like the other toys
+- Share QR like the other toys
