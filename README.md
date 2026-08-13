@@ -23,6 +23,7 @@ Open http://localhost:8080/
 - **Enable tilt** — device orientation adds a *small* gravity nudge (phone / tablet)
 - Tiny WebAudio hits (mute in the bar)
 - **Edit mode** — drag wall endpoints / bumpers / flipper pivots; add wall, sling, bumper; delete; save to localStorage; reset default (`E` or Edit button)
+- **Physics panel** — table angle, gravity, bounce, friction, drag, ball size, bumper/sling/flipper/plunger power, tilt gain, max speed (saved)
 
 ## Next (likely)
 

@@ -102,12 +102,87 @@
       pointer-events: none;
       z-index: 2;
     }
+    #physPanel {
+      display: none;
+      position: fixed;
+      right: 10px; top: 10px; bottom: 70px;
+      width: min(300px, calc(100vw - 20px));
+      z-index: 4;
+      overflow-x: hidden; overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      background: rgba(8, 14, 22, 0.92);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px;
+      padding: 12px 14px 16px;
+      backdrop-filter: blur(8px);
+      color: var(--ink);
+      font-family: system-ui, sans-serif;
+      touch-action: pan-y;
+    }
+    #physPanel.open { display: block; }
+    #physPanel h2 {
+      font-size: 12px; font-weight: 700; letter-spacing: 0.08em;
+      text-transform: uppercase; color: #fff; margin: 0 0 10px;
+    }
+    #physPanel .row {
+      display: grid; grid-template-columns: 88px 1fr 44px;
+      align-items: center; gap: 8px; margin: 8px 0; min-height: 34px;
+      font-size: 12px; color: var(--muted);
+    }
+    #physPanel .row span.val {
+      color: var(--accent); font-weight: 650; text-align: right;
+      font-variant-numeric: tabular-nums; font-size: 11px;
+    }
+    #physPanel input[type="range"] {
+      width: 100%; height: 28px; accent-color: var(--accent); cursor: pointer;
+      -webkit-appearance: none; appearance: none; background: transparent;
+    }
+    #physPanel input[type="range"]::-webkit-slider-runnable-track {
+      height: 10px; border-radius: 999px; background: rgba(255,255,255,0.14);
+    }
+    #physPanel input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 24px; height: 24px; margin-top: -7px;
+      border-radius: 50%; background: var(--accent); border: 2px solid #0a1a14;
+    }
+    #physPanel .phys-actions {
+      display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;
+    }
+    #physPanel .phys-actions button {
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.06);
+      color: var(--ink);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font: 650 11px system-ui, sans-serif;
+      cursor: pointer;
+      flex: 1;
+    }
   </style>
 </head>
 <body>
   <div id="wrap"><canvas id="c"></canvas></div>
   <div id="hud"></div>
   <div id="hint">Z / ← left · / or → right · Space plunge · phone tilt nudges the ball</div>
+  <div id="physPanel">
+    <h2>Physics</h2>
+    <label class="row">Angle <input type="range" id="pAngle" min="3" max="14" step="0.1"><span class="val" id="vAngle"></span></label>
+    <label class="row">Gravity <input type="range" id="pGravity" min="400" max="1600" step="10"><span class="val" id="vGravity"></span></label>
+    <label class="row">Bounce <input type="range" id="pBounce" min="0.2" max="0.95" step="0.01"><span class="val" id="vBounce"></span></label>
+    <label class="row">Friction <input type="range" id="pFriction" min="0" max="0.12" step="0.005"><span class="val" id="vFriction"></span></label>
+    <label class="row">Drag <input type="range" id="pDrag" min="0" max="0.5" step="0.01"><span class="val" id="vDrag"></span></label>
+    <label class="row">Ball size <input type="range" id="pBallR" min="5" max="14" step="0.5"><span class="val" id="vBallR"></span></label>
+    <label class="row">Bumper <input type="range" id="pBumper" min="80" max="700" step="10"><span class="val" id="vBumper"></span></label>
+    <label class="row">Sling <input type="range" id="pSling" min="40" max="500" step="10"><span class="val" id="vSling"></span></label>
+    <label class="row">Flip spd <input type="range" id="pFlipSpd" min="8" max="40" step="1"><span class="val" id="vFlipSpd"></span></label>
+    <label class="row">Flip kick <input type="range" id="pFlipKick" min="8" max="40" step="1"><span class="val" id="vFlipKick"></span></label>
+    <label class="row">Plunge <input type="range" id="pPlunge" min="300" max="1200" step="20"><span class="val" id="vPlunge"></span></label>
+    <label class="row">Tilt <input type="range" id="pTilt" min="0" max="0.6" step="0.02"><span class="val" id="vTilt"></span></label>
+    <label class="row">Max spd <input type="range" id="pMaxSpd" min="600" max="2200" step="50"><span class="val" id="vMaxSpd"></span></label>
+    <div class="phys-actions">
+      <button type="button" id="btnPhysReset">Defaults</button>
+      <button type="button" id="btnPhysClose">Close</button>
+    </div>
+  </div>
   <div id="editBar">
     <button type="button" id="toolSelect" class="on">Select</button>
     <button type="button" id="toolWall">+ Wall</button>
@@ -119,6 +194,7 @@
   </div>
   <div id="bar">
     <button type="button" id="btnEdit">Edit</button>
+    <button type="button" id="btnPhys">Physics</button>
     <button type="button" id="btnTilt">Enable tilt</button>
     <button type="button" id="btnMute">Sound on</button>
     <button type="button" id="btnNudge">Nudge</button>
@@ -131,26 +207,46 @@
 
   const W = 360;
   const H = 640;
-  const BALL_R = 8.5;
-  const GRAVITY = 980;
-  const AIR_DRAG = 0.12;
-  const RESTITUTION = 0.62;
-  const BUMPER_BOOST = 320;
   const FLIP_REST = 0.42;
   const FLIP_MAX = -0.55;
-  const FLIP_OMEGA = 22;
-  const FLIP_RETURN = 10;
-  const TILT_GAIN = 0.22;
   const TILT_MAX_DEG = 28;
   const NUDGE_IMPULSE = 180;
   const STORE_KEY = "pinballplane-table-v1";
+  const PHYS_KEY = "pinballplane-phys-v1";
   const HIT_PT = 14;
+
+  const PHYS_DEFAULTS = {
+    tableAngle: 7,      // degrees — steeper = stronger down-table pull
+    gravity: 980,       // base px/s² before angle scale
+    bounce: 0.62,       // wall restitution
+    friction: 0.02,     // wall tangential friction
+    drag: 0.12,         // air drag /s
+    ballR: 8.5,
+    bumperKick: 320,
+    slingKick: 220,
+    flipSpd: 22,        // rad/s raise
+    flipReturn: 10,     // rad/s return
+    flipKick: 22,       // impulse scale from omega
+    plungeBase: 420,
+    plungeExtra: 780,
+    tiltGain: 0.22,
+    maxSpd: 1400,
+  };
+
+  /** @type {typeof PHYS_DEFAULTS} */
+  let phys = { ...PHYS_DEFAULTS };
+
+  function effectiveGravity() {
+    // Pinball tables are shallow; sin(angle) scales "down the playfield"
+    return phys.gravity * Math.sin((phys.tableAngle * Math.PI) / 180) / Math.sin((7 * Math.PI) / 180);
+  }
 
   const canvas = document.getElementById("c");
   const ctx = canvas.getContext("2d");
   const hud = document.getElementById("hud");
   const hint = document.getElementById("hint");
   const editBar = document.getElementById("editBar");
+  const physPanel = document.getElementById("physPanel");
 
   let dpr = 1;
   let scale = 1;
@@ -348,7 +444,7 @@
   }
 
   // —— Ball ————————————————————————————————————————————————————————
-  const ball = { x: 318, y: 500, vx: 0, vy: 0, r: BALL_R, live: false, drained: false };
+  const ball = { x: 318, y: 500, vx: 0, vy: 0, r: phys.ballR, live: false, drained: false };
   let plungerPower = 0;
   let plunging = false;
   let score = 0;
@@ -358,6 +454,7 @@
   let nudgeFlash = 0;
   let message = "";
   let messageT = 0;
+  let physOpen = false;
 
   function say(msg, t = 1.4) {
     message = msg;
@@ -374,6 +471,7 @@
     ball.y = 490;
     ball.vx = 0;
     ball.vy = 0;
+    ball.r = phys.ballR;
     ball.live = false;
     ball.drained = false;
     plungerPower = 0;
@@ -382,16 +480,16 @@
 
   function launchBall() {
     if (ball.live) return;
-    const power = 420 + plungerPower * 780;
+    const power = phys.plungeBase + plungerPower * phys.plungeExtra;
     ball.vy = -power;
-    ball.vx = -40; // slight left bias helps exit the lane mouth
+    ball.vx = -40;
     ball.live = true;
     plungerPower = 0;
     beep(140, 0.08, "sawtooth", 0.05);
   }
 
   // —— Physics —————————————————————————————————————————————————————
-  function reflectVelocity(nx, ny, restitution, friction = 0.02) {
+  function reflectVelocity(nx, ny, restitution, friction = phys.friction) {
     const vn = ball.vx * nx + ball.vy * ny;
     if (vn >= 0) return 0;
     ball.vx -= (1 + restitution) * vn * nx;
@@ -435,9 +533,9 @@
     const nx = dx / d, ny = dy / d;
     ball.x += nx * (min - d);
     ball.y += ny * (min - d);
-    reflectVelocity(nx, ny, 0.9, 0);
-    ball.vx += nx * BUMPER_BOOST;
-    ball.vy += ny * BUMPER_BOOST;
+    reflectVelocity(nx, ny, Math.min(0.95, phys.bounce + 0.28), 0);
+    ball.vx += nx * phys.bumperKick;
+    ball.vy += ny * phys.bumperKick;
     b.flash = 1;
     combo += 1;
     score += b.score * Math.min(combo, 5);
@@ -446,11 +544,11 @@
 
   function updateFlipper(f, dt) {
     const target = f.pressed ? flipperActiveAngle(f) : flipperRestAngle(f);
-    const speed = f.pressed ? FLIP_OMEGA : FLIP_RETURN;
+    const speed = f.pressed ? phys.flipSpd : phys.flipReturn;
     const diff = target - f.angle;
-    const step = Math.sign(diff) * Math.min(Math.abs(diff), speed * dt);
+    const stepAmt = Math.sign(diff) * Math.min(Math.abs(diff), speed * dt);
     const prev = f.angle;
-    f.angle += step;
+    f.angle += stepAmt;
     f.omega = dt > 0 ? (f.angle - prev) / dt : 0;
   }
 
@@ -458,12 +556,12 @@
     const tip = flipperTip(f);
     const hit = collideSegment(
       f.pivot.x, f.pivot.y, tip.x, tip.y,
-      0.35,
+      Math.max(0.25, phys.bounce * 0.55),
       -Math.sin(f.angle) * f.omega * f.length * 0.7,
       Math.cos(f.angle) * f.omega * f.length * 0.7
     );
     if (hit && f.pressed && Math.abs(f.omega) > 8) {
-      const boost = Math.min(520, Math.abs(f.omega) * 22);
+      const boost = Math.min(520, Math.abs(f.omega) * phys.flipKick);
       ball.vx += (-Math.sin(f.angle)) * boost * 0.35 * f.side;
       ball.vy += -Math.abs(Math.cos(f.angle)) * boost;
       beep(90, 0.04, "triangle", 0.05);
@@ -487,12 +585,14 @@
 
     if (!ball.live || editing) return;
 
-    const gx = tilt.gx * GRAVITY * TILT_GAIN;
-    const gy = GRAVITY + tilt.gy * GRAVITY * TILT_GAIN * 0.55;
+    ball.r = phys.ballR;
+    const g = effectiveGravity();
+    const gx = tilt.gx * g * phys.tiltGain;
+    const gy = g + tilt.gy * g * phys.tiltGain * 0.55;
     ball.vx += gx * dt;
     ball.vy += gy * dt;
 
-    const damp = Math.exp(-AIR_DRAG * dt);
+    const damp = Math.exp(-phys.drag * dt);
     ball.vx *= damp;
     ball.vy *= damp;
 
@@ -503,11 +603,11 @@
       ball.y += ball.vy * h;
 
       for (const w of walls) {
-        const rest = w.kind === "sling" ? 1.15 : RESTITUTION;
+        const rest = w.kind === "sling" ? Math.min(1.2, phys.bounce + 0.5) : phys.bounce;
         const hard = collideSegment(w.a.x, w.a.y, w.b.x, w.b.y, rest);
         if (hard && w.kind === "sling") {
-          ball.vy -= 220;
-          ball.vx += (ball.x < W / 2 ? 1 : -1) * 80;
+          ball.vy -= phys.slingKick;
+          ball.vx += (ball.x < W / 2 ? 1 : -1) * phys.slingKick * 0.36;
           beep(160, 0.04, "square", 0.035);
           score += 10;
         } else if (hard) {
@@ -518,10 +618,9 @@
       for (const f of flippers) collideFlipper(f);
       for (const b of bumpers) collideBumper(b);
 
-      // Soft outer bounds only — keep launch lane free (right side open enough)
-      if (ball.x < 4) { ball.x = 4; ball.vx = Math.abs(ball.vx) * RESTITUTION; }
-      if (ball.x > W - 4) { ball.x = W - 4; ball.vx = -Math.abs(ball.vx) * RESTITUTION; }
-      if (ball.y < 4) { ball.y = 4; ball.vy = Math.abs(ball.vy) * RESTITUTION; }
+      if (ball.x < 4) { ball.x = 4; ball.vx = Math.abs(ball.vx) * phys.bounce; }
+      if (ball.x > W - 4) { ball.x = W - 4; ball.vx = -Math.abs(ball.vx) * phys.bounce; }
+      if (ball.y < 4) { ball.y = 4; ball.vy = Math.abs(ball.vy) * phys.bounce; }
     }
 
     if (ball.y > H + 20 && !ball.drained) {
@@ -538,9 +637,9 @@
     }
 
     const spd = len(ball.vx, ball.vy);
-    if (spd > 1400) {
-      ball.vx *= 1400 / spd;
-      ball.vy *= 1400 / spd;
+    if (spd > phys.maxSpd) {
+      ball.vx *= phys.maxSpd / spd;
+      ball.vy *= phys.maxSpd / spd;
     }
   }
 
@@ -588,6 +687,7 @@
     wallDraft = null;
     setLeft(false); setRight(false); plunging = false;
     if (on) {
+      setPhysOpen(false);
       setTool("select");
       say("Edit mode");
     } else {
@@ -884,6 +984,7 @@
       ? `tilt γ ${tilt.rawG.toFixed(0)}° β ${tilt.rawB.toFixed(0)}°`
       : "tilt off";
     hud.innerHTML = `<div><b>Pinball Plane</b> · ${editing ? "editor" : "physics"}</div>
+      <div>table ${phys.tableAngle.toFixed(1)}° · g ${Math.round(effectiveGravity())}</div>
       <div class="${tilt.enabled ? "" : "warn"}">${tiltTxt}</div>`;
   }
 
@@ -1047,9 +1148,88 @@
   });
   document.getElementById("btnMute").classList.add("on");
 
+  // —— Physics settings panel ——————————————————————————————————————
+  const PHYS_SLIDERS = [
+    { id: "pAngle", key: "tableAngle", val: "vAngle", fmt: v => v.toFixed(1) + "°" },
+    { id: "pGravity", key: "gravity", val: "vGravity", fmt: v => String(Math.round(v)) },
+    { id: "pBounce", key: "bounce", val: "vBounce", fmt: v => v.toFixed(2) },
+    { id: "pFriction", key: "friction", val: "vFriction", fmt: v => v.toFixed(3) },
+    { id: "pDrag", key: "drag", val: "vDrag", fmt: v => v.toFixed(2) },
+    { id: "pBallR", key: "ballR", val: "vBallR", fmt: v => v.toFixed(1) },
+    { id: "pBumper", key: "bumperKick", val: "vBumper", fmt: v => String(Math.round(v)) },
+    { id: "pSling", key: "slingKick", val: "vSling", fmt: v => String(Math.round(v)) },
+    { id: "pFlipSpd", key: "flipSpd", val: "vFlipSpd", fmt: v => String(Math.round(v)) },
+    { id: "pFlipKick", key: "flipKick", val: "vFlipKick", fmt: v => String(Math.round(v)) },
+    { id: "pPlunge", key: "plungeExtra", val: "vPlunge", fmt: v => String(Math.round(phys.plungeBase + v)) },
+    { id: "pTilt", key: "tiltGain", val: "vTilt", fmt: v => v.toFixed(2) },
+    { id: "pMaxSpd", key: "maxSpd", val: "vMaxSpd", fmt: v => String(Math.round(v)) },
+  ];
+
+  function syncPhysUI() {
+    for (const s of PHYS_SLIDERS) {
+      const el = document.getElementById(s.id);
+      const v = phys[s.key];
+      el.value = String(v);
+      document.getElementById(s.val).textContent = s.fmt(v);
+    }
+    ball.r = phys.ballR;
+  }
+
+  function savePhys() {
+    try { localStorage.setItem(PHYS_KEY, JSON.stringify(phys)); } catch (_) {}
+  }
+
+  function loadPhys() {
+    try {
+      const raw = localStorage.getItem(PHYS_KEY);
+      if (!raw) return false;
+      const data = JSON.parse(raw);
+      phys = { ...PHYS_DEFAULTS, ...data };
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function setPhysOpen(on) {
+    physOpen = on;
+    physPanel.classList.toggle("open", on);
+    document.getElementById("btnPhys").classList.toggle("on", on);
+    if (on) {
+      if (editing) setEditing(false);
+      syncPhysUI();
+      say("Physics tweaks");
+    }
+  }
+
+  for (const s of PHYS_SLIDERS) {
+    document.getElementById(s.id).addEventListener("input", (e) => {
+      const v = parseFloat(e.target.value);
+      phys[s.key] = v;
+      document.getElementById(s.val).textContent = s.fmt(v);
+      if (s.key === "ballR") ball.r = v;
+      savePhys();
+    });
+  }
+
+  document.getElementById("btnPhys").addEventListener("click", () => setPhysOpen(!physOpen));
+  document.getElementById("btnPhysClose").addEventListener("click", () => setPhysOpen(false));
+  document.getElementById("btnPhysReset").addEventListener("click", () => {
+    phys = { ...PHYS_DEFAULTS };
+    try { localStorage.removeItem(PHYS_KEY); } catch (_) {}
+    syncPhysUI();
+    say("Physics defaults");
+  });
+
+  // Prevent slider drags from flipping the table underneath
+  physPanel.addEventListener("pointerdown", (e) => e.stopPropagation());
+  physPanel.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
+
   // —— Boot ————————————————————————————————————————————————————————
   buildDefaultTable();
   if (loadTable()) say("Loaded saved table", 1.0);
+  if (loadPhys()) say("Loaded physics", 1.0);
+  syncPhysUI();
   serveBall();
   resize();
   window.addEventListener("resize", resize);
