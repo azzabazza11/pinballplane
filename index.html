@@ -1,0 +1,1069 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0a1018">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <title>Pinball Plane</title>
+  <style>
+    :root {
+      --bg: #0a1018;
+      --play: #121a24;
+      --ink: #d7e0ea;
+      --muted: #7a8a9c;
+      --accent: #3dffa8;
+      --warn: #ffb347;
+      --hot: #ff6b5a;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Segoe UI", system-ui, sans-serif;
+      -webkit-user-select: none; user-select: none;
+      -webkit-touch-callout: none;
+      touch-action: none;
+    }
+    #wrap {
+      position: relative;
+      width: 100%; height: 100%;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(ellipse 80% 60% at 50% 20%, #152033 0%, transparent 55%),
+        linear-gradient(180deg, #0c121c, #070b12);
+    }
+    canvas {
+      display: block;
+      max-width: 100%;
+      max-height: 100%;
+      background: var(--play);
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 18px 50px rgba(0,0,0,0.45);
+    }
+    #hud {
+      position: fixed; left: 12px; top: 10px;
+      font: 600 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--muted);
+      text-shadow: 0 1px 8px #000;
+      pointer-events: none;
+      z-index: 2;
+    }
+    #hud b { color: var(--accent); font-weight: 700; }
+    #hud .warn { color: var(--warn); }
+    #bar, #editBar {
+      position: fixed; left: 0; right: 0;
+      display: flex; gap: 6px; justify-content: center; align-items: center;
+      flex-wrap: wrap;
+      padding: 8px 10px;
+      background: linear-gradient(transparent, rgba(0,0,0,0.55));
+      z-index: 3;
+    }
+    #bar { bottom: 0; padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+    #editBar {
+      bottom: 58px;
+      display: none;
+      background: rgba(8, 14, 22, 0.88);
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+    #editBar.show { display: flex; }
+    #bar button, #editBar button {
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(18, 26, 36, 0.9);
+      color: var(--ink);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font: 650 11px system-ui, sans-serif;
+      letter-spacing: 0.03em;
+      cursor: pointer;
+      min-width: 64px;
+    }
+    #bar button:active, #editBar button:active { transform: scale(0.97); }
+    #bar button.on, #editBar button.on {
+      background: var(--accent);
+      color: #062218;
+      border-color: #6dffc0;
+    }
+    #editBar button.warn.on {
+      background: var(--warn);
+      color: #1a1200;
+      border-color: #ffd28a;
+    }
+    #hint {
+      position: fixed; left: 50%; top: 12px; transform: translateX(-50%);
+      max-width: min(92vw, 480px);
+      text-align: center;
+      font: 500 12px/1.4 system-ui, sans-serif;
+      color: var(--muted);
+      pointer-events: none;
+      z-index: 2;
+    }
+  </style>
+</head>
+<body>
+  <div id="wrap"><canvas id="c"></canvas></div>
+  <div id="hud"></div>
+  <div id="hint">Z / ← left · / or → right · Space plunge · phone tilt nudges the ball</div>
+  <div id="editBar">
+    <button type="button" id="toolSelect" class="on">Select</button>
+    <button type="button" id="toolWall">+ Wall</button>
+    <button type="button" id="toolSling">+ Sling</button>
+    <button type="button" id="toolBumper">+ Bumper</button>
+    <button type="button" id="btnDelete">Delete</button>
+    <button type="button" id="btnSave">Save</button>
+    <button type="button" id="btnReset">Reset</button>
+  </div>
+  <div id="bar">
+    <button type="button" id="btnEdit">Edit</button>
+    <button type="button" id="btnTilt">Enable tilt</button>
+    <button type="button" id="btnMute">Sound on</button>
+    <button type="button" id="btnNudge">Nudge</button>
+    <button type="button" id="btnBall">New ball</button>
+  </div>
+
+<script>
+(() => {
+  "use strict";
+
+  const W = 360;
+  const H = 640;
+  const BALL_R = 8.5;
+  const GRAVITY = 980;
+  const AIR_DRAG = 0.12;
+  const RESTITUTION = 0.62;
+  const BUMPER_BOOST = 320;
+  const FLIP_REST = 0.42;
+  const FLIP_MAX = -0.55;
+  const FLIP_OMEGA = 22;
+  const FLIP_RETURN = 10;
+  const TILT_GAIN = 0.22;
+  const TILT_MAX_DEG = 28;
+  const NUDGE_IMPULSE = 180;
+  const STORE_KEY = "pinballplane-table-v1";
+  const HIT_PT = 14;
+
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+  const hud = document.getElementById("hud");
+  const hint = document.getElementById("hint");
+  const editBar = document.getElementById("editBar");
+
+  let dpr = 1;
+  let scale = 1;
+  let ox = 0, oy = 0;
+
+  // —— Sound ——————————————————————————————————————————————————————
+  let muted = false;
+  let audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  }
+  function beep(freq, dur = 0.05, type = "square", gain = 0.04) {
+    if (muted) return;
+    try {
+      ensureAudio();
+      const t0 = audioCtx.currentTime;
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = type;
+      o.frequency.setValueAtTime(freq, t0);
+      g.gain.setValueAtTime(gain, t0);
+      g.gain.exponentialRampToValueAtTime(0.0008, t0 + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(t0); o.stop(t0 + dur + 0.02);
+    } catch (_) {}
+  }
+
+  // —— Math ————————————————————————————————————————————————————————
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const len = (x, y) => Math.hypot(x, y);
+  const dot = (ax, ay, bx, by) => ax * bx + ay * by;
+  const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+
+  function closestPointOnSeg(px, py, ax, ay, bx, by) {
+    const abx = bx - ax, aby = by - ay;
+    const apx = px - ax, apy = py - ay;
+    const ab2 = abx * abx + aby * aby || 1e-9;
+    const t = clamp(dot(apx, apy, abx, aby) / ab2, 0, 1);
+    return { x: ax + abx * t, y: ay + aby * t, t };
+  }
+
+  function pointerToWorld(e) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left) / scale,
+      y: (e.clientY - rect.top) / scale,
+    };
+  }
+
+  // —— Table data ——————————————————————————————————————————————————
+  /** @type {{a:{x:number,y:number}, b:{x:number,y:number}, kind:string}[]} */
+  let walls = [];
+  /** @type {{x:number,y:number,r:number,flash:number,score:number}[]} */
+  let bumpers = [];
+
+  const flippers = [
+    { pivot: { x: 118, y: 545 }, length: 52, side: 1, angle: FLIP_REST, omega: 0, pressed: false },
+    { pivot: { x: 242, y: 545 }, length: 52, side: -1, angle: Math.PI - FLIP_REST, omega: 0, pressed: false },
+  ];
+
+  const defaultFlippers = [
+    { x: 118, y: 545, length: 52 },
+    { x: 242, y: 545, length: 52 },
+  ];
+
+  function addWall(x1, y1, x2, y2, kind = "wall") {
+    walls.push({ a: { x: x1, y: y1 }, b: { x: x2, y: y2 }, kind });
+  }
+
+  function buildDefaultTable() {
+    walls = [];
+    bumpers = [];
+
+    // Outer shell — launch lane open at the top so the ball can enter the field
+    addWall(24, 40, 24, 560);          // left
+    addWall(24, 40, 336, 40);          // full top rail
+    addWall(336, 40, 336, 560);        // right outer
+    addWall(300, 115, 300, 520);       // launch divider (gap above = exit)
+    addWall(300, 520, 336, 520);       // plunger shelf
+
+    // Exit guide: sends plunging ball left into the playfield
+    addWall(300, 115, 268, 72);
+    addWall(268, 72, 220, 52);
+
+    // Bottom shelves / drain
+    addWall(24, 560, 128, 600);
+    addWall(232, 600, 300, 560);
+    addWall(128, 600, 128, 630);
+    addWall(232, 600, 232, 630);
+
+    // Upper arch (left side)
+    addWall(24, 120, 70, 70);
+    addWall(70, 70, 150, 55);
+
+    // Inlanes / outlanes
+    addWall(24, 480, 90, 540);
+    addWall(300, 480, 234, 540);
+
+    // Slingshots
+    addWall(70, 470, 118, 530, "sling");
+    addWall(254, 470, 206, 530, "sling");
+    addWall(50, 470, 70, 470);
+    addWall(274, 470, 254, 470);
+
+    // Center diamond
+    addWall(155, 300, 180, 330);
+    addWall(180, 330, 205, 300);
+    addWall(205, 300, 180, 270);
+    addWall(180, 270, 155, 300);
+
+    bumpers = [
+      { x: 110, y: 180, r: 22, flash: 0, score: 100 },
+      { x: 200, y: 160, r: 22, flash: 0, score: 100 },
+      { x: 155, y: 230, r: 20, flash: 0, score: 150 },
+    ];
+
+    flippers[0].pivot.x = defaultFlippers[0].x;
+    flippers[0].pivot.y = defaultFlippers[0].y;
+    flippers[0].length = defaultFlippers[0].length;
+    flippers[1].pivot.x = defaultFlippers[1].x;
+    flippers[1].pivot.y = defaultFlippers[1].y;
+    flippers[1].length = defaultFlippers[1].length;
+  }
+
+  function serializeTable() {
+    return {
+      v: 1,
+      walls: walls.map(w => ({
+        a: { x: +w.a.x.toFixed(1), y: +w.a.y.toFixed(1) },
+        b: { x: +w.b.x.toFixed(1), y: +w.b.y.toFixed(1) },
+        kind: w.kind || "wall",
+      })),
+      bumpers: bumpers.map(b => ({
+        x: +b.x.toFixed(1), y: +b.y.toFixed(1), r: +b.r.toFixed(1), score: b.score || 100,
+      })),
+      flippers: flippers.map(f => ({
+        x: +f.pivot.x.toFixed(1), y: +f.pivot.y.toFixed(1), length: +f.length.toFixed(1),
+      })),
+    };
+  }
+
+  function applyTable(data) {
+    if (!data || !Array.isArray(data.walls)) return false;
+    walls = data.walls.map(w => ({
+      a: { x: w.a.x, y: w.a.y },
+      b: { x: w.b.x, y: w.b.y },
+      kind: w.kind === "sling" ? "sling" : "wall",
+    }));
+    bumpers = (data.bumpers || []).map(b => ({
+      x: b.x, y: b.y, r: b.r || 20, flash: 0, score: b.score || 100,
+    }));
+    if (Array.isArray(data.flippers) && data.flippers.length >= 2) {
+      for (let i = 0; i < 2; i++) {
+        flippers[i].pivot.x = data.flippers[i].x;
+        flippers[i].pivot.y = data.flippers[i].y;
+        flippers[i].length = data.flippers[i].length || 52;
+      }
+    }
+    return true;
+  }
+
+  function saveTable() {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify(serializeTable()));
+      say("Table saved");
+      beep(520, 0.05, "sine", 0.04);
+    } catch (_) {
+      say("Save failed");
+    }
+  }
+
+  function loadTable() {
+    try {
+      const raw = localStorage.getItem(STORE_KEY);
+      if (!raw) return false;
+      return applyTable(JSON.parse(raw));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // —— Flipper helpers —————————————————————————————————————————————
+  function flipperTip(f) {
+    return {
+      x: f.pivot.x + Math.cos(f.angle) * f.length,
+      y: f.pivot.y + Math.sin(f.angle) * f.length,
+    };
+  }
+  function flipperRestAngle(f) {
+    return f.side > 0 ? FLIP_REST : Math.PI - FLIP_REST;
+  }
+  function flipperActiveAngle(f) {
+    return f.side > 0 ? FLIP_MAX : Math.PI - FLIP_MAX;
+  }
+
+  // —— Ball ————————————————————————————————————————————————————————
+  const ball = { x: 318, y: 500, vx: 0, vy: 0, r: BALL_R, live: false, drained: false };
+  let plungerPower = 0;
+  let plunging = false;
+  let score = 0;
+  let ballsLeft = 3;
+  let combo = 0;
+  let tilt = { gx: 0, gy: 0, enabled: false, rawB: 0, rawG: 0 };
+  let nudgeFlash = 0;
+  let message = "";
+  let messageT = 0;
+
+  function say(msg, t = 1.4) {
+    message = msg;
+    messageT = t;
+  }
+
+  function serveBall() {
+    if (ballsLeft <= 0) {
+      ballsLeft = 3;
+      score = 0;
+      say("New game");
+    }
+    ball.x = 318;
+    ball.y = 490;
+    ball.vx = 0;
+    ball.vy = 0;
+    ball.live = false;
+    ball.drained = false;
+    plungerPower = 0;
+    combo = 0;
+  }
+
+  function launchBall() {
+    if (ball.live) return;
+    const power = 420 + plungerPower * 780;
+    ball.vy = -power;
+    ball.vx = -40; // slight left bias helps exit the lane mouth
+    ball.live = true;
+    plungerPower = 0;
+    beep(140, 0.08, "sawtooth", 0.05);
+  }
+
+  // —— Physics —————————————————————————————————————————————————————
+  function reflectVelocity(nx, ny, restitution, friction = 0.02) {
+    const vn = ball.vx * nx + ball.vy * ny;
+    if (vn >= 0) return 0;
+    ball.vx -= (1 + restitution) * vn * nx;
+    ball.vy -= (1 + restitution) * vn * ny;
+    const tx = -ny, ty = nx;
+    const vt = ball.vx * tx + ball.vy * ty;
+    ball.vx -= friction * vt * tx;
+    ball.vy -= friction * vt * ty;
+    return -vn;
+  }
+
+  function collideSegment(ax, ay, bx, by, restitution, movingVx = 0, movingVy = 0) {
+    const c = closestPointOnSeg(ball.x, ball.y, ax, ay, bx, by);
+    let dx = ball.x - c.x, dy = ball.y - c.y;
+    let d = Math.hypot(dx, dy);
+    if (d < 1e-6) {
+      const sx = bx - ax, sy = by - ay;
+      const nl = Math.hypot(sx, sy) || 1;
+      dx = -sy / nl; dy = sx / nl;
+      d = 0;
+    }
+    if (d >= ball.r) return false;
+    const nx = dx / (d || 1);
+    const ny = dy / (d || 1);
+    const overlap = ball.r - d;
+    ball.x += nx * overlap;
+    ball.y += ny * overlap;
+    ball.vx -= movingVx;
+    ball.vy -= movingVy;
+    const impact = reflectVelocity(nx, ny, restitution);
+    ball.vx += movingVx;
+    ball.vy += movingVy;
+    return impact > 30;
+  }
+
+  function collideBumper(b) {
+    const dx = ball.x - b.x, dy = ball.y - b.y;
+    const d = Math.hypot(dx, dy);
+    const min = ball.r + b.r;
+    if (d >= min || d < 1e-6) return;
+    const nx = dx / d, ny = dy / d;
+    ball.x += nx * (min - d);
+    ball.y += ny * (min - d);
+    reflectVelocity(nx, ny, 0.9, 0);
+    ball.vx += nx * BUMPER_BOOST;
+    ball.vy += ny * BUMPER_BOOST;
+    b.flash = 1;
+    combo += 1;
+    score += b.score * Math.min(combo, 5);
+    beep(220 + combo * 40, 0.06, "square", 0.045);
+  }
+
+  function updateFlipper(f, dt) {
+    const target = f.pressed ? flipperActiveAngle(f) : flipperRestAngle(f);
+    const speed = f.pressed ? FLIP_OMEGA : FLIP_RETURN;
+    const diff = target - f.angle;
+    const step = Math.sign(diff) * Math.min(Math.abs(diff), speed * dt);
+    const prev = f.angle;
+    f.angle += step;
+    f.omega = dt > 0 ? (f.angle - prev) / dt : 0;
+  }
+
+  function collideFlipper(f) {
+    const tip = flipperTip(f);
+    const hit = collideSegment(
+      f.pivot.x, f.pivot.y, tip.x, tip.y,
+      0.35,
+      -Math.sin(f.angle) * f.omega * f.length * 0.7,
+      Math.cos(f.angle) * f.omega * f.length * 0.7
+    );
+    if (hit && f.pressed && Math.abs(f.omega) > 8) {
+      const boost = Math.min(520, Math.abs(f.omega) * 22);
+      ball.vx += (-Math.sin(f.angle)) * boost * 0.35 * f.side;
+      ball.vy += -Math.abs(Math.cos(f.angle)) * boost;
+      beep(90, 0.04, "triangle", 0.05);
+      combo = 0;
+    } else if (hit) {
+      beep(70, 0.03, "triangle", 0.03);
+    }
+  }
+
+  function step(dt) {
+    dt = clamp(dt, 0, 0.033);
+    nudgeFlash = Math.max(0, nudgeFlash - dt * 2);
+    if (messageT > 0) messageT -= dt;
+
+    for (const f of flippers) updateFlipper(f, dt);
+    for (const b of bumpers) b.flash = Math.max(0, b.flash - dt * 3);
+
+    if (plunging && !ball.live) {
+      plungerPower = Math.min(1, plungerPower + dt * 1.1);
+    }
+
+    if (!ball.live || editing) return;
+
+    const gx = tilt.gx * GRAVITY * TILT_GAIN;
+    const gy = GRAVITY + tilt.gy * GRAVITY * TILT_GAIN * 0.55;
+    ball.vx += gx * dt;
+    ball.vy += gy * dt;
+
+    const damp = Math.exp(-AIR_DRAG * dt);
+    ball.vx *= damp;
+    ball.vy *= damp;
+
+    const sub = 3;
+    const h = dt / sub;
+    for (let s = 0; s < sub; s++) {
+      ball.x += ball.vx * h;
+      ball.y += ball.vy * h;
+
+      for (const w of walls) {
+        const rest = w.kind === "sling" ? 1.15 : RESTITUTION;
+        const hard = collideSegment(w.a.x, w.a.y, w.b.x, w.b.y, rest);
+        if (hard && w.kind === "sling") {
+          ball.vy -= 220;
+          ball.vx += (ball.x < W / 2 ? 1 : -1) * 80;
+          beep(160, 0.04, "square", 0.035);
+          score += 10;
+        } else if (hard) {
+          beep(50 + Math.random() * 30, 0.025, "triangle", 0.025);
+        }
+      }
+
+      for (const f of flippers) collideFlipper(f);
+      for (const b of bumpers) collideBumper(b);
+
+      // Soft outer bounds only — keep launch lane free (right side open enough)
+      if (ball.x < 4) { ball.x = 4; ball.vx = Math.abs(ball.vx) * RESTITUTION; }
+      if (ball.x > W - 4) { ball.x = W - 4; ball.vx = -Math.abs(ball.vx) * RESTITUTION; }
+      if (ball.y < 4) { ball.y = 4; ball.vy = Math.abs(ball.vy) * RESTITUTION; }
+    }
+
+    if (ball.y > H + 20 && !ball.drained) {
+      ball.drained = true;
+      ball.live = false;
+      ballsLeft -= 1;
+      beep(48, 0.25, "sine", 0.05);
+      if (ballsLeft > 0) {
+        say("Ball lost");
+        setTimeout(serveBall, 700);
+      } else {
+        say("Game over — New ball to replay");
+      }
+    }
+
+    const spd = len(ball.vx, ball.vy);
+    if (spd > 1400) {
+      ball.vx *= 1400 / spd;
+      ball.vy *= 1400 / spd;
+    }
+  }
+
+  // —— Editor ——————————————————————————————————————————————————————
+  let editing = false;
+  /** @type {"select"|"wall"|"sling"|"bumper"} */
+  let tool = "select";
+  /** @type {null|{type:string, wall?:number, end?:string, bumper?:number, flip?:number}} */
+  let selection = null;
+  let drag = null;
+  let wallDraft = null; // {x,y} first click when placing wall
+
+  function setTool(t) {
+    tool = t;
+    wallDraft = null;
+    for (const id of ["toolSelect", "toolWall", "toolSling", "toolBumper"]) {
+      document.getElementById(id).classList.remove("on");
+    }
+    const map = { select: "toolSelect", wall: "toolWall", sling: "toolSling", bumper: "toolBumper" };
+    document.getElementById(map[t]).classList.add("on");
+    updateHint();
+  }
+
+  function updateHint() {
+    if (!editing) {
+      hint.textContent = "Z / ← left · / or → right · Space plunge · phone tilt nudges the ball";
+      return;
+    }
+    if (tool === "select") {
+      hint.textContent = "Drag endpoints · bumpers · flipper pivots · [ ] resize bumper · Del delete";
+    } else if (tool === "wall" || tool === "sling") {
+      hint.textContent = wallDraft ? "Click second point" : `Click first point for ${tool}`;
+    } else if (tool === "bumper") {
+      hint.textContent = "Click to place bumper";
+    }
+  }
+
+  function setEditing(on) {
+    editing = on;
+    editBar.classList.toggle("show", on);
+    document.getElementById("btnEdit").classList.toggle("on", on);
+    document.getElementById("btnEdit").textContent = on ? "Play" : "Edit";
+    selection = null;
+    drag = null;
+    wallDraft = null;
+    setLeft(false); setRight(false); plunging = false;
+    if (on) {
+      setTool("select");
+      say("Edit mode");
+    } else {
+      updateHint();
+      say("Play mode");
+    }
+  }
+
+  function hitTest(px, py) {
+    // Flipper pivots
+    for (let i = 0; i < flippers.length; i++) {
+      if (dist(px, py, flippers[i].pivot.x, flippers[i].pivot.y) <= HIT_PT) {
+        return { type: "flip", flip: i };
+      }
+    }
+    // Bumper centers / rims
+    for (let i = bumpers.length - 1; i >= 0; i--) {
+      const b = bumpers[i];
+      if (dist(px, py, b.x, b.y) <= b.r + 6) {
+        return { type: "bumper", bumper: i };
+      }
+    }
+    // Wall endpoints first
+    for (let i = walls.length - 1; i >= 0; i--) {
+      const w = walls[i];
+      if (dist(px, py, w.a.x, w.a.y) <= HIT_PT) return { type: "wall", wall: i, end: "a" };
+      if (dist(px, py, w.b.x, w.b.y) <= HIT_PT) return { type: "wall", wall: i, end: "b" };
+    }
+    // Wall segments
+    for (let i = walls.length - 1; i >= 0; i--) {
+      const w = walls[i];
+      const c = closestPointOnSeg(px, py, w.a.x, w.a.y, w.b.x, w.b.y);
+      if (dist(px, py, c.x, c.y) <= 10) return { type: "wall", wall: i, end: null };
+    }
+    return null;
+  }
+
+  function deleteSelection() {
+    if (!selection) return;
+    if (selection.type === "wall") {
+      walls.splice(selection.wall, 1);
+      selection = null;
+      say("Wall deleted");
+    } else if (selection.type === "bumper") {
+      bumpers.splice(selection.bumper, 1);
+      selection = null;
+      say("Bumper deleted");
+    } else if (selection.type === "flip") {
+      say("Flippers stay — drag the pivot instead");
+    }
+  }
+
+  function onEditPointerDown(e) {
+    const p = pointerToWorld(e);
+    if (tool === "wall" || tool === "sling") {
+      if (!wallDraft) {
+        wallDraft = { x: p.x, y: p.y };
+        updateHint();
+      } else {
+        addWall(wallDraft.x, wallDraft.y, p.x, p.y, tool === "sling" ? "sling" : "wall");
+        selection = { type: "wall", wall: walls.length - 1, end: "b" };
+        wallDraft = null;
+        setTool("select");
+        say(tool === "sling" ? "Sling added" : "Wall added");
+      }
+      return;
+    }
+    if (tool === "bumper") {
+      bumpers.push({ x: p.x, y: p.y, r: 20, flash: 0, score: 100 });
+      selection = { type: "bumper", bumper: bumpers.length - 1 };
+      setTool("select");
+      say("Bumper added");
+      return;
+    }
+
+    const hit = hitTest(p.x, p.y);
+    selection = hit;
+    if (!hit) return;
+
+    if (hit.type === "wall" && hit.end) {
+      drag = { kind: "wall-end", wall: hit.wall, end: hit.end, ox: p.x, oy: p.y };
+    } else if (hit.type === "wall") {
+      const w = walls[hit.wall];
+      drag = {
+        kind: "wall-move", wall: hit.wall,
+        ox: p.x, oy: p.y,
+        ax: w.a.x, ay: w.a.y, bx: w.b.x, by: w.b.y,
+      };
+    } else if (hit.type === "bumper") {
+      drag = { kind: "bumper", bumper: hit.bumper, ox: p.x, oy: p.y, bx: bumpers[hit.bumper].x, by: bumpers[hit.bumper].y };
+    } else if (hit.type === "flip") {
+      drag = { kind: "flip", flip: hit.flip, ox: p.x, oy: p.y, fx: flippers[hit.flip].pivot.x, fy: flippers[hit.flip].pivot.y };
+    }
+  }
+
+  function onEditPointerMove(e) {
+    if (!drag) return;
+    const p = pointerToWorld(e);
+    const dx = p.x - drag.ox;
+    const dy = p.y - drag.oy;
+    if (drag.kind === "wall-end") {
+      const pt = walls[drag.wall][drag.end];
+      pt.x = clamp(p.x, 0, W);
+      pt.y = clamp(p.y, 0, H);
+    } else if (drag.kind === "wall-move") {
+      const w = walls[drag.wall];
+      w.a.x = clamp(drag.ax + dx, 0, W);
+      w.a.y = clamp(drag.ay + dy, 0, H);
+      w.b.x = clamp(drag.bx + dx, 0, W);
+      w.b.y = clamp(drag.by + dy, 0, H);
+    } else if (drag.kind === "bumper") {
+      const b = bumpers[drag.bumper];
+      b.x = clamp(drag.bx + dx, 0, W);
+      b.y = clamp(drag.by + dy, 0, H);
+    } else if (drag.kind === "flip") {
+      const f = flippers[drag.flip];
+      f.pivot.x = clamp(drag.fx + dx, 0, W);
+      f.pivot.y = clamp(drag.fy + dy, 0, H);
+    }
+  }
+
+  function onEditPointerUp() {
+    drag = null;
+  }
+
+  // —— Draw ————————————————————————————————————————————————————————
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    scale = Math.min(vw / W, vh / H);
+    const cssW = W * scale;
+    const cssH = H * scale;
+    canvas.style.width = cssW + "px";
+    canvas.style.height = cssH + "px";
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
+    ox = (vw - cssW) / 2;
+    oy = (vh - cssH) / 2;
+  }
+
+  function drawHandle(x, y, selected) {
+    ctx.beginPath();
+    ctx.arc(x, y, selected ? 5 : 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = selected ? "#3dffa8" : "rgba(255,255,255,0.55)";
+    ctx.fill();
+    ctx.strokeStyle = selected ? "#fff" : "rgba(0,0,0,0.4)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  function drawWall(w, idx) {
+    const sel = selection && selection.type === "wall" && selection.wall === idx;
+    ctx.beginPath();
+    ctx.moveTo(w.a.x, w.a.y);
+    ctx.lineTo(w.b.x, w.b.y);
+    if (w.kind === "sling") {
+      ctx.strokeStyle = sel ? "#ffd28a" : "rgba(255,179,71,0.85)";
+      ctx.lineWidth = sel ? 5 : 4;
+    } else {
+      ctx.strokeStyle = sel ? "#3dffa8" : "rgba(180,200,220,0.55)";
+      ctx.lineWidth = sel ? 4 : 3;
+    }
+    ctx.lineCap = "round";
+    ctx.stroke();
+    if (editing) {
+      drawHandle(w.a.x, w.a.y, sel && selection.end === "a");
+      drawHandle(w.b.x, w.b.y, sel && selection.end === "b");
+    }
+  }
+
+  function drawFlipper(f, idx) {
+    const tip = flipperTip(f);
+    const sel = selection && selection.type === "flip" && selection.flip === idx;
+    ctx.beginPath();
+    ctx.moveTo(f.pivot.x, f.pivot.y);
+    ctx.lineTo(tip.x, tip.y);
+    ctx.strokeStyle = f.pressed ? "#3dffa8" : (sel ? "#fff" : "#c5d2e0");
+    ctx.lineWidth = 10;
+    ctx.lineCap = "round";
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(f.pivot.x, f.pivot.y, 7, 0, Math.PI * 2);
+    ctx.fillStyle = sel ? "#3dffa8" : "#8aa0b5";
+    ctx.fill();
+    if (editing) drawHandle(f.pivot.x, f.pivot.y, sel);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#152033");
+    g.addColorStop(1, "#0d141e");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    // Launch lane tint
+    ctx.fillStyle = "rgba(61,255,168,0.04)";
+    ctx.fillRect(300, 115, 36, 405);
+    // Exit mouth hint
+    ctx.fillStyle = "rgba(61,255,168,0.07)";
+    ctx.fillRect(268, 40, 68, 75);
+
+    ctx.fillStyle = "rgba(255,107,90,0.12)";
+    ctx.fillRect(128, 600, 104, 40);
+
+    for (let i = 0; i < walls.length; i++) drawWall(walls[i], i);
+
+    for (let i = 0; i < bumpers.length; i++) {
+      const b = bumpers[i];
+      const glow = b.flash;
+      const sel = selection && selection.type === "bumper" && selection.bumper === i;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      ctx.fillStyle = glow > 0
+        ? `rgba(61,255,168,${0.35 + glow * 0.5})`
+        : "rgba(70, 110, 140, 0.55)";
+      ctx.fill();
+      ctx.lineWidth = sel ? 4 : 3;
+      ctx.strokeStyle = sel ? "#3dffa8" : (glow > 0 ? "#3dffa8" : "rgba(200,220,240,0.45)");
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, 5, 0, Math.PI * 2);
+      ctx.fillStyle = "#e8f2ff";
+      ctx.fill();
+      if (editing) drawHandle(b.x, b.y, sel);
+    }
+
+    for (let i = 0; i < flippers.length; i++) drawFlipper(flippers[i], i);
+
+    if (wallDraft) {
+      ctx.beginPath();
+      ctx.arc(wallDraft.x, wallDraft.y, 4, 0, Math.PI * 2);
+      ctx.fillStyle = "#ffb347";
+      ctx.fill();
+    }
+
+    if (!ball.live && !editing) {
+      const p = plungerPower;
+      ctx.fillStyle = "rgba(255,179,71,0.85)";
+      ctx.fillRect(308, 500 + (1 - p) * 18, 20, 8 + p * 22);
+      ctx.strokeStyle = "rgba(255,255,255,0.25)";
+      ctx.strokeRect(306, 498, 24, 50);
+    }
+
+    if (!ball.drained || ball.y < H + 40) {
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+      const bg = ctx.createRadialGradient(ball.x - 2, ball.y - 3, 1, ball.x, ball.y, ball.r);
+      bg.addColorStop(0, "#ffffff");
+      bg.addColorStop(0.45, "#d0dbe8");
+      bg.addColorStop(1, "#7a8a9c");
+      ctx.fillStyle = bg;
+      ctx.fill();
+    }
+
+    if (nudgeFlash > 0) {
+      ctx.fillStyle = `rgba(255,179,71,${nudgeFlash * 0.15})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    if (editing) {
+      ctx.fillStyle = "rgba(255,179,71,0.12)";
+      ctx.fillRect(24, 8, 272, 24);
+      ctx.fillStyle = "#ffb347";
+      ctx.font = "600 13px ui-monospace, monospace";
+      ctx.fillText("EDIT", 32, 25);
+      ctx.fillStyle = "#c5d2e0";
+      ctx.fillText(`${walls.length} walls · ${bumpers.length} bumpers`, 90, 25);
+    } else {
+      ctx.fillStyle = "rgba(0,0,0,0.35)";
+      ctx.fillRect(24, 8, 272, 24);
+      ctx.fillStyle = "#3dffa8";
+      ctx.font = "600 13px ui-monospace, monospace";
+      ctx.fillText(`SCORE ${score}`, 32, 25);
+      ctx.fillStyle = "#c5d2e0";
+      ctx.fillText(`BALLS ${Math.max(0, ballsLeft)}`, 160, 25);
+      if (combo > 1) {
+        ctx.fillStyle = "#ffb347";
+        ctx.fillText(`x${combo}`, 250, 25);
+      }
+    }
+
+    if (messageT > 0) {
+      ctx.fillStyle = `rgba(255,255,255,${Math.min(1, messageT)})`;
+      ctx.font = "650 16px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(message, W / 2, H * 0.42);
+      ctx.textAlign = "left";
+    }
+
+    const tiltTxt = tilt.enabled
+      ? `tilt γ ${tilt.rawG.toFixed(0)}° β ${tilt.rawB.toFixed(0)}°`
+      : "tilt off";
+    hud.innerHTML = `<div><b>Pinball Plane</b> · ${editing ? "editor" : "physics"}</div>
+      <div class="${tilt.enabled ? "" : "warn"}">${tiltTxt}</div>`;
+  }
+
+  // —— Input ———————————————————————————————————————————————————————
+  function setLeft(v) { flippers[0].pressed = v; }
+  function setRight(v) { flippers[1].pressed = v; }
+
+  function onKey(e, down) {
+    const k = e.key.toLowerCase();
+    if (["z", "arrowleft", "/", "arrowright", " ", "spacebar", "x", "shift"].includes(k) || e.code === "Slash") {
+      e.preventDefault();
+    }
+
+    if (editing) {
+      if (down && (k === "delete" || k === "backspace")) {
+        e.preventDefault();
+        deleteSelection();
+      }
+      if (down && (k === "[" || k === "]") && selection && selection.type === "bumper") {
+        const b = bumpers[selection.bumper];
+        b.r = clamp(b.r + (k === "]" ? 2 : -2), 10, 48);
+      }
+      if (down && k === "e") setEditing(false);
+      return;
+    }
+
+    if (down && k === "e") { setEditing(true); return; }
+
+    if (k === "z" || k === "arrowleft") setLeft(down);
+    if (k === "/" || k === "arrowright" || e.code === "Slash") setRight(down);
+    if (k === "x" || k === "shift") { setLeft(down); setRight(down); }
+
+    if ((k === " " || k === "spacebar") && down) {
+      plunging = true;
+      ensureAudio();
+    }
+    if ((k === " " || k === "spacebar") && !down) {
+      if (plunging) {
+        plunging = false;
+        if (!ball.live && !ball.drained) launchBall();
+        else if (!ball.live) serveBall();
+      }
+    }
+  }
+
+  window.addEventListener("keydown", (e) => onKey(e, true));
+  window.addEventListener("keyup", (e) => onKey(e, false));
+
+  function touchMode(e) {
+    const p = pointerToWorld(e);
+    if (p.x > 290 && p.y > 420) return "plunge";
+    if (p.x < W / 2) return "left";
+    return "right";
+  }
+
+  const touches = new Map();
+  canvas.addEventListener("pointerdown", (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    ensureAudio();
+    if (editing) {
+      onEditPointerDown(e);
+      return;
+    }
+    const mode = touchMode(e);
+    touches.set(e.pointerId, mode);
+    if (mode === "left") setLeft(true);
+    if (mode === "right") setRight(true);
+    if (mode === "plunge") plunging = true;
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (editing) onEditPointerMove(e);
+  });
+  canvas.addEventListener("pointerup", (e) => {
+    if (editing) {
+      onEditPointerUp();
+      return;
+    }
+    const mode = touches.get(e.pointerId);
+    touches.delete(e.pointerId);
+    if (mode === "left") setLeft(false);
+    if (mode === "right") setRight(false);
+    if (mode === "plunge") {
+      plunging = false;
+      if (!ball.live && !ball.drained) launchBall();
+    }
+  });
+  canvas.addEventListener("pointercancel", () => {
+    touches.clear();
+    drag = null;
+    setLeft(false); setRight(false); plunging = false;
+  });
+
+  canvas.addEventListener("wheel", (e) => {
+    if (!editing || !selection || selection.type !== "bumper") return;
+    e.preventDefault();
+    const b = bumpers[selection.bumper];
+    b.r = clamp(b.r + (e.deltaY < 0 ? 2 : -2), 10, 48);
+  }, { passive: false });
+
+  // —— Tilt / buttons ——————————————————————————————————————————————
+  function onOrient(ev) {
+    if (!tilt.enabled) return;
+    const beta = ev.beta, gamma = ev.gamma;
+    if (beta == null || gamma == null) return;
+    tilt.rawB = beta;
+    tilt.rawG = gamma;
+    tilt.gx = clamp(gamma, -TILT_MAX_DEG, TILT_MAX_DEG) / TILT_MAX_DEG;
+    tilt.gy = clamp(beta - 55, -TILT_MAX_DEG, TILT_MAX_DEG) / TILT_MAX_DEG * 0.35;
+  }
+
+  async function enableTilt() {
+    try {
+      if (typeof DeviceOrientationEvent !== "undefined" &&
+          typeof DeviceOrientationEvent.requestPermission === "function") {
+        const res = await DeviceOrientationEvent.requestPermission();
+        if (res !== "granted") { say("Tilt permission denied"); return; }
+      }
+      window.addEventListener("deviceorientation", onOrient, true);
+      tilt.enabled = true;
+      document.getElementById("btnTilt").classList.add("on");
+      document.getElementById("btnTilt").textContent = "Tilt on";
+      say("Tilt enabled — gentle nudges only");
+    } catch (_) {
+      say("Tilt not available here");
+    }
+  }
+
+  function nudge() {
+    if (!ball.live || editing) return;
+    ball.vx += (Math.random() - 0.5) * NUDGE_IMPULSE;
+    ball.vy -= NUDGE_IMPULSE * 0.35;
+    nudgeFlash = 1;
+    beep(60, 0.05, "sawtooth", 0.04);
+  }
+
+  document.getElementById("btnEdit").addEventListener("click", () => setEditing(!editing));
+  document.getElementById("toolSelect").addEventListener("click", () => setTool("select"));
+  document.getElementById("toolWall").addEventListener("click", () => setTool("wall"));
+  document.getElementById("toolSling").addEventListener("click", () => setTool("sling"));
+  document.getElementById("toolBumper").addEventListener("click", () => setTool("bumper"));
+  document.getElementById("btnDelete").addEventListener("click", deleteSelection);
+  document.getElementById("btnSave").addEventListener("click", saveTable);
+  document.getElementById("btnReset").addEventListener("click", () => {
+    buildDefaultTable();
+    selection = null;
+    try { localStorage.removeItem(STORE_KEY); } catch (_) {}
+    say("Default table restored");
+  });
+  document.getElementById("btnTilt").addEventListener("click", enableTilt);
+  document.getElementById("btnMute").addEventListener("click", () => {
+    muted = !muted;
+    const b = document.getElementById("btnMute");
+    b.textContent = muted ? "Sound off" : "Sound on";
+    b.classList.toggle("on", !muted);
+    if (!muted) ensureAudio();
+  });
+  document.getElementById("btnNudge").addEventListener("click", nudge);
+  document.getElementById("btnBall").addEventListener("click", () => {
+    if (ballsLeft <= 0) ballsLeft = 3;
+    serveBall();
+  });
+  document.getElementById("btnMute").classList.add("on");
+
+  // —— Boot ————————————————————————————————————————————————————————
+  buildDefaultTable();
+  if (loadTable()) say("Loaded saved table", 1.0);
+  serveBall();
+  resize();
+  window.addEventListener("resize", resize);
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = (now - last) / 1000;
+    last = now;
+    step(dt);
+    draw();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
