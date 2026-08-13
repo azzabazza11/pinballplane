@@ -24,6 +24,14 @@ Open http://localhost:8080/
 - Tiny WebAudio hits (mute in the bar)
 - **Edit mode** — drag wall endpoints / bumpers / flipper pivots; add wall, sling, bumper; delete; save to localStorage; reset default (`E` or Edit button)
 - **Physics panel** — table angle, gravity, bounce, friction, drag, ball size, bumper/sling/flipper/plunger power, tilt gain, max speed (saved)
+- **Themes** — `assets/themes/default` (AI playfield + sprites) and `classic` (wire look); **Theme** button cycles; **Guide PNG** in Edit exports collision wireframe for AI backdrops
+
+## Art pipeline
+
+1. In Edit, tap **Guide PNG** to download the collision overlay
+2. Paint / generate a playfield at 360×640 (or 720×1280) with no ball/flippers, using the guide as a lock layer
+3. Drop files into `assets/themes/<name>/` and add a `theme.json` (see `default`)
+4. Add the theme id to `THEME_IDS` in `index.html`
 
 ## Next (likely)
 

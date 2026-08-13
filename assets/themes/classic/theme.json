@@ -1,0 +1,13 @@
+{
+  "id": "classic",
+  "name": "Classic Wire",
+  "playfield": null,
+  "ball": null,
+  "flipperLeft": null,
+  "flipperRight": null,
+  "bumperFlash": null,
+  "scoreColor": "#3dffa8",
+  "accent": "#3dffa8",
+  "showProceduralBumpers": true,
+  "wallOpacityPlay": 1
+}

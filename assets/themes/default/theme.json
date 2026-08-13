@@ -1,0 +1,13 @@
+{
+  "id": "default",
+  "name": "Teal Metal",
+  "playfield": "playfield.webp",
+  "ball": "ball.png",
+  "flipperLeft": "flipper-left.png",
+  "flipperRight": "flipper-right.png",
+  "bumperFlash": "bumper-flash.png",
+  "scoreColor": "#3dffa8",
+  "accent": "#3dffa8",
+  "showProceduralBumpers": false,
+  "wallOpacityPlay": 0
+}

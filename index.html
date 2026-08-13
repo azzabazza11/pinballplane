@@ -190,11 +190,13 @@
     <button type="button" id="toolBumper">+ Bumper</button>
     <button type="button" id="btnDelete">Delete</button>
     <button type="button" id="btnSave">Save</button>
+    <button type="button" id="btnGuide">Guide PNG</button>
     <button type="button" id="btnReset">Reset</button>
   </div>
   <div id="bar">
     <button type="button" id="btnEdit">Edit</button>
     <button type="button" id="btnPhys">Physics</button>
+    <button type="button" id="btnTheme">Theme</button>
     <button type="button" id="btnTilt">Enable tilt</button>
     <button type="button" id="btnMute">Sound on</button>
     <button type="button" id="btnNudge">Nudge</button>
@@ -213,7 +215,9 @@
   const NUDGE_IMPULSE = 180;
   const STORE_KEY = "pinballplane-table-v1";
   const PHYS_KEY = "pinballplane-phys-v1";
+  const THEME_KEY = "pinballplane-theme-v1";
   const HIT_PT = 14;
+  const THEME_IDS = ["default", "classic"];
 
   const PHYS_DEFAULTS = {
     tableAngle: 7,      // degrees — steeper = stronger down-table pull
@@ -239,6 +243,64 @@
   function effectiveGravity() {
     // Pinball tables are shallow; sin(angle) scales "down the playfield"
     return phys.gravity * Math.sin((phys.tableAngle * Math.PI) / 180) / Math.sin((7 * Math.PI) / 180);
+  }
+
+  // —— Theme / art pack ————————————————————————————————————————————
+  let themeId = "default";
+  let themeMeta = {
+    id: "classic",
+    name: "Classic Wire",
+    scoreColor: "#3dffa8",
+    accent: "#3dffa8",
+    showProceduralBumpers: true,
+    wallOpacityPlay: 1,
+  };
+  /** @type {{playfield: HTMLImageElement|null, ball: HTMLImageElement|null, flipL: HTMLImageElement|null, flipR: HTMLImageElement|null, flash: HTMLImageElement|null}} */
+  const themeImgs = { playfield: null, ball: null, flipL: null, flipR: null, flash: null };
+
+  function loadImage(url) {
+    return new Promise((resolve) => {
+      if (!url) { resolve(null); return; }
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = url;
+    });
+  }
+
+  async function loadTheme(id) {
+    const base = `assets/themes/${id}/`;
+    let meta;
+    try {
+      const res = await fetch(base + "theme.json", { cache: "no-cache" });
+      meta = await res.json();
+    } catch (_) {
+      meta = { id, name: id, playfield: null, showProceduralBumpers: true, wallOpacityPlay: 1, scoreColor: "#3dffa8", accent: "#3dffa8" };
+    }
+    themeId = id;
+    themeMeta = meta;
+    const [pf, ballImg, flipL, flipR, flash] = await Promise.all([
+      loadImage(meta.playfield ? base + meta.playfield : null),
+      loadImage(meta.ball ? base + meta.ball : null),
+      loadImage(meta.flipperLeft ? base + meta.flipperLeft : null),
+      loadImage(meta.flipperRight ? base + meta.flipperRight : null),
+      loadImage(meta.bumperFlash ? base + meta.bumperFlash : null),
+    ]);
+    themeImgs.playfield = pf;
+    themeImgs.ball = ballImg;
+    themeImgs.flipL = flipL;
+    themeImgs.flipR = flipR;
+    themeImgs.flash = flash;
+    try { localStorage.setItem(THEME_KEY, id); } catch (_) {}
+    const btn = document.getElementById("btnTheme");
+    if (btn) btn.textContent = meta.name || id;
+    say("Theme: " + (meta.name || id));
+  }
+
+  async function cycleTheme() {
+    const i = THEME_IDS.indexOf(themeId);
+    const next = THEME_IDS[(i + 1) % THEME_IDS.length];
+    await loadTheme(next);
   }
 
   const canvas = document.getElementById("c");
@@ -840,8 +902,12 @@
     ctx.stroke();
   }
 
-  function drawWall(w, idx) {
+  function drawWall(w, idx, forceVisible) {
     const sel = selection && selection.type === "wall" && selection.wall === idx;
+    const playOpacity = themeMeta.wallOpacityPlay == null ? 0 : themeMeta.wallOpacityPlay;
+    if (!editing && !forceVisible && playOpacity <= 0 && !sel) return;
+    ctx.save();
+    if (!editing && !forceVisible) ctx.globalAlpha = playOpacity;
     ctx.beginPath();
     ctx.moveTo(w.a.x, w.a.y);
     ctx.lineTo(w.b.x, w.b.y);
@@ -854,6 +920,7 @@
     }
     ctx.lineCap = "round";
     ctx.stroke();
+    ctx.restore();
     if (editing) {
       drawHandle(w.a.x, w.a.y, sel && selection.end === "a");
       drawHandle(w.b.x, w.b.y, sel && selection.end === "b");
@@ -863,6 +930,26 @@
   function drawFlipper(f, idx) {
     const tip = flipperTip(f);
     const sel = selection && selection.type === "flip" && selection.flip === idx;
+    const img = f.side > 0 ? themeImgs.flipL : themeImgs.flipR;
+    if (img && img.complete && img.naturalWidth) {
+      const len = f.length;
+      const thick = 18;
+      ctx.save();
+      ctx.translate(f.pivot.x, f.pivot.y);
+      ctx.rotate(f.angle);
+      // Both sprites: hub near left, tip to +x; world angle aims the tip
+      ctx.drawImage(img, -8, -thick / 2, len + 14, thick);
+      ctx.restore();
+      if (editing) {
+        ctx.beginPath();
+        ctx.arc(f.pivot.x, f.pivot.y, 7, 0, Math.PI * 2);
+        ctx.fillStyle = sel ? "#3dffa8" : "rgba(138,160,181,0.7)";
+        ctx.fill();
+        drawHandle(f.pivot.x, f.pivot.y, sel);
+      }
+      return;
+    }
+    // Procedural fallback
     ctx.beginPath();
     ctx.moveTo(f.pivot.x, f.pivot.y);
     ctx.lineTo(tip.x, tip.y);
@@ -877,30 +964,30 @@
     if (editing) drawHandle(f.pivot.x, f.pivot.y, sel);
   }
 
-  function draw() {
-    ctx.clearRect(0, 0, W, H);
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, "#152033");
-    g.addColorStop(1, "#0d141e");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, H);
+  function drawBallSprite() {
+    if (ball.drained && ball.y >= H + 40) return;
+    const img = themeImgs.ball;
+    if (img && img.complete && img.naturalWidth) {
+      const d = ball.r * 2.2;
+      ctx.drawImage(img, ball.x - d / 2, ball.y - d / 2, d, d);
+      return;
+    }
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+    const bg = ctx.createRadialGradient(ball.x - 2, ball.y - 3, 1, ball.x, ball.y, ball.r);
+    bg.addColorStop(0, "#ffffff");
+    bg.addColorStop(0.45, "#d0dbe8");
+    bg.addColorStop(1, "#7a8a9c");
+    ctx.fillStyle = bg;
+    ctx.fill();
+  }
 
-    // Launch lane tint
-    ctx.fillStyle = "rgba(61,255,168,0.04)";
-    ctx.fillRect(300, 115, 36, 405);
-    // Exit mouth hint
-    ctx.fillStyle = "rgba(61,255,168,0.07)";
-    ctx.fillRect(268, 40, 68, 75);
+  function drawBumper(b, i) {
+    const glow = b.flash;
+    const sel = selection && selection.type === "bumper" && selection.bumper === i;
+    const procedural = editing || themeMeta.showProceduralBumpers !== false;
 
-    ctx.fillStyle = "rgba(255,107,90,0.12)";
-    ctx.fillRect(128, 600, 104, 40);
-
-    for (let i = 0; i < walls.length; i++) drawWall(walls[i], i);
-
-    for (let i = 0; i < bumpers.length; i++) {
-      const b = bumpers[i];
-      const glow = b.flash;
-      const sel = selection && selection.type === "bumper" && selection.bumper === i;
+    if (procedural) {
       ctx.beginPath();
       ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
       ctx.fillStyle = glow > 0
@@ -914,9 +1001,64 @@
       ctx.arc(b.x, b.y, 5, 0, Math.PI * 2);
       ctx.fillStyle = "#e8f2ff";
       ctx.fill();
-      if (editing) drawHandle(b.x, b.y, sel);
     }
 
+    // Flash overlay (additive-ish) when hit — even if bumper art is in backdrop
+    if (glow > 0) {
+      const flash = themeImgs.flash;
+      if (flash && flash.complete && flash.naturalWidth) {
+        const d = b.r * 2.8;
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, glow);
+        ctx.drawImage(flash, b.x - d / 2, b.y - d / 2, d, d);
+        ctx.restore();
+      } else if (!procedural) {
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r * 1.15, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(61,255,168,${0.25 * glow})`;
+        ctx.fill();
+      }
+    }
+
+    if (editing) {
+      if (!procedural) {
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+        ctx.strokeStyle = sel ? "#3dffa8" : "rgba(255,255,255,0.35)";
+        ctx.lineWidth = sel ? 2 : 1;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      drawHandle(b.x, b.y, sel);
+    }
+  }
+
+  function drawBackdrop() {
+    const pf = themeImgs.playfield;
+    if (pf && pf.complete && pf.naturalWidth) {
+      ctx.drawImage(pf, 0, 0, W, H);
+      return;
+    }
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#152033");
+    g.addColorStop(1, "#0d141e");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(61,255,168,0.04)";
+    ctx.fillRect(300, 115, 36, 405);
+    ctx.fillStyle = "rgba(61,255,168,0.07)";
+    ctx.fillRect(268, 40, 68, 75);
+    ctx.fillStyle = "rgba(255,107,90,0.12)";
+    ctx.fillRect(128, 600, 104, 40);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    drawBackdrop();
+
+    for (let i = 0; i < walls.length; i++) drawWall(walls[i], i);
+    for (let i = 0; i < bumpers.length; i++) drawBumper(bumpers[i], i);
     for (let i = 0; i < flippers.length; i++) drawFlipper(flippers[i], i);
 
     if (wallDraft) {
@@ -934,22 +1076,14 @@
       ctx.strokeRect(306, 498, 24, 50);
     }
 
-    if (!ball.drained || ball.y < H + 40) {
-      ctx.beginPath();
-      ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
-      const bg = ctx.createRadialGradient(ball.x - 2, ball.y - 3, 1, ball.x, ball.y, ball.r);
-      bg.addColorStop(0, "#ffffff");
-      bg.addColorStop(0.45, "#d0dbe8");
-      bg.addColorStop(1, "#7a8a9c");
-      ctx.fillStyle = bg;
-      ctx.fill();
-    }
+    drawBallSprite();
 
     if (nudgeFlash > 0) {
       ctx.fillStyle = `rgba(255,179,71,${nudgeFlash * 0.15})`;
       ctx.fillRect(0, 0, W, H);
     }
 
+    const scoreCol = themeMeta.scoreColor || "#3dffa8";
     if (editing) {
       ctx.fillStyle = "rgba(255,179,71,0.12)";
       ctx.fillRect(24, 8, 272, 24);
@@ -961,7 +1095,7 @@
     } else {
       ctx.fillStyle = "rgba(0,0,0,0.35)";
       ctx.fillRect(24, 8, 272, 24);
-      ctx.fillStyle = "#3dffa8";
+      ctx.fillStyle = scoreCol;
       ctx.font = "600 13px ui-monospace, monospace";
       ctx.fillText(`SCORE ${score}`, 32, 25);
       ctx.fillStyle = "#c5d2e0";
@@ -983,9 +1117,92 @@
     const tiltTxt = tilt.enabled
       ? `tilt γ ${tilt.rawG.toFixed(0)}° β ${tilt.rawB.toFixed(0)}°`
       : "tilt off";
-    hud.innerHTML = `<div><b>Pinball Plane</b> · ${editing ? "editor" : "physics"}</div>
+    hud.innerHTML = `<div><b>Pinball Plane</b> · ${editing ? "editor" : (themeMeta.name || themeId)}</div>
       <div>table ${phys.tableAngle.toFixed(1)}° · g ${Math.round(effectiveGravity())}</div>
       <div class="${tilt.enabled ? "" : "warn"}">${tiltTxt}</div>`;
+  }
+
+  /** Export collision wireframe PNG for AI backdrop alignment */
+  function exportCollisionGuide() {
+    const off = document.createElement("canvas");
+    const scaleOut = 2;
+    off.width = W * scaleOut;
+    off.height = H * scaleOut;
+    const g = off.getContext("2d");
+    g.setTransform(scaleOut, 0, 0, scaleOut, 0, 0);
+    g.fillStyle = "#0a1018";
+    g.fillRect(0, 0, W, H);
+    // Dim playfield silhouette
+    g.fillStyle = "#121a24";
+    g.fillRect(24, 40, 312, 560);
+    g.fillStyle = "rgba(255,107,90,0.2)";
+    g.fillRect(128, 600, 104, 40);
+    g.fillStyle = "rgba(61,255,168,0.12)";
+    g.fillRect(300, 115, 36, 405);
+
+    g.lineCap = "round";
+    for (const w of walls) {
+      g.beginPath();
+      g.moveTo(w.a.x, w.a.y);
+      g.lineTo(w.b.x, w.b.y);
+      g.strokeStyle = w.kind === "sling" ? "#ffb347" : "#7fd4ff";
+      g.lineWidth = w.kind === "sling" ? 4 : 3;
+      g.stroke();
+      // Endpoints
+      for (const p of [w.a, w.b]) {
+        g.beginPath();
+        g.arc(p.x, p.y, 3, 0, Math.PI * 2);
+        g.fillStyle = "#ffffff";
+        g.fill();
+      }
+    }
+    for (const b of bumpers) {
+      g.beginPath();
+      g.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      g.strokeStyle = "#3dffa8";
+      g.lineWidth = 2;
+      g.stroke();
+      g.beginPath();
+      g.arc(b.x, b.y, 2, 0, Math.PI * 2);
+      g.fillStyle = "#3dffa8";
+      g.fill();
+      g.fillStyle = "#c5d2e0";
+      g.font = "10px monospace";
+      g.fillText(`r${b.r}`, b.x + b.r + 4, b.y);
+    }
+    for (const f of flippers) {
+      const rest = f.side > 0 ? FLIP_REST : Math.PI - FLIP_REST;
+      const tip = {
+        x: f.pivot.x + Math.cos(rest) * f.length,
+        y: f.pivot.y + Math.sin(rest) * f.length,
+      };
+      g.beginPath();
+      g.moveTo(f.pivot.x, f.pivot.y);
+      g.lineTo(tip.x, tip.y);
+      g.strokeStyle = "#e8f2ff";
+      g.lineWidth = 8;
+      g.stroke();
+      g.beginPath();
+      g.arc(f.pivot.x, f.pivot.y, 6, 0, Math.PI * 2);
+      g.fillStyle = "#ffb347";
+      g.fill();
+    }
+    g.fillStyle = "#7a8a9c";
+    g.font = "11px monospace";
+    g.fillText("Pinball Plane collision guide · 360×640", 16, 20);
+    g.fillText("Use as overlay when painting AI playfield (no ball/flippers in art)", 16, H - 12);
+
+    off.toBlob((blob) => {
+      if (!blob) { say("Guide export failed"); return; }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "pinballplane-collision-guide.png";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      say("Guide PNG downloaded");
+      beep(440, 0.05, "sine", 0.04);
+    }, "image/png");
   }
 
   // —— Input ———————————————————————————————————————————————————————
@@ -1127,6 +1344,7 @@
   document.getElementById("toolBumper").addEventListener("click", () => setTool("bumper"));
   document.getElementById("btnDelete").addEventListener("click", deleteSelection);
   document.getElementById("btnSave").addEventListener("click", saveTable);
+  document.getElementById("btnGuide").addEventListener("click", exportCollisionGuide);
   document.getElementById("btnReset").addEventListener("click", () => {
     buildDefaultTable();
     selection = null;
@@ -1134,6 +1352,7 @@
     say("Default table restored");
   });
   document.getElementById("btnTilt").addEventListener("click", enableTilt);
+  document.getElementById("btnTheme").addEventListener("click", () => { cycleTheme(); });
   document.getElementById("btnMute").addEventListener("click", () => {
     muted = !muted;
     const b = document.getElementById("btnMute");
@@ -1233,6 +1452,15 @@
   serveBall();
   resize();
   window.addEventListener("resize", resize);
+
+  (async () => {
+    let startTheme = "default";
+    try {
+      const saved = localStorage.getItem(THEME_KEY);
+      if (saved && THEME_IDS.includes(saved)) startTheme = saved;
+    } catch (_) {}
+    await loadTheme(startTheme);
+  })();
 
   let last = performance.now();
   function frame(now) {
