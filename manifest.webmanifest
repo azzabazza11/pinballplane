@@ -1,8 +1,9 @@
 {
+  "id": "https://azzabazza11.github.io/pinballplane/",
   "name": "Pinball Plane",
   "short_name": "Pinball",
   "description": "2D pinball for your phone — tilt, edit, install as an app. No account needed.",
-  "start_url": "./?source=pwa",
+  "start_url": "./?homescreen=1",
   "scope": "./",
   "display": "standalone",
   "background_color": "#0a1018",

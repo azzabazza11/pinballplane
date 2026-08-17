@@ -1450,74 +1450,11 @@
   physPanel.addEventListener("pointerdown", (e) => e.stopPropagation());
   physPanel.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
 
-  // —— PWA install (Android Chrome + iOS Add to Home Screen) ————————
-  const APP_VER = "1.0.0";
-  let deferredInstallPrompt = null;
-  const btnInstall = document.getElementById("btnInstall");
-
-  function isIosLike() {
-    const ua = navigator.userAgent || "";
-    if (/iPhone|iPad|iPod/i.test(ua)) return true;
-    return navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
-  }
-  function isStandalone() {
-    return window.matchMedia("(display-mode: standalone)").matches ||
-      window.navigator.standalone === true;
-  }
-  function updateInstallButton() {
-    if (!btnInstall) return;
-    if (isStandalone()) {
-      btnInstall.hidden = true;
-      return;
-    }
-    btnInstall.hidden = false;
-    btnInstall.classList.toggle("on", !!deferredInstallPrompt);
-    btnInstall.textContent = deferredInstallPrompt
-      ? "Install"
-      : (isIosLike() ? "Add to Home" : "Install");
-  }
-  async function promptInstallApp() {
-    if (isStandalone()) {
-      say("Already installed");
-      return;
-    }
-    if (deferredInstallPrompt) {
-      deferredInstallPrompt.prompt();
-      try { await deferredInstallPrompt.userChoice; } catch (_) {}
-      deferredInstallPrompt = null;
-      updateInstallButton();
-      return;
-    }
-    say(isIosLike()
-      ? "Share → Add to Home Screen"
-      : "Browser menu → Install app / Add to Home screen", 2.4);
-  }
-  window.addEventListener("beforeinstallprompt", (e) => {
-    e.preventDefault();
-    deferredInstallPrompt = e;
-    updateInstallButton();
-  });
-  window.addEventListener("appinstalled", () => {
-    deferredInstallPrompt = null;
-    updateInstallButton();
-    say("Installed — open from your home screen");
-  });
-  btnInstall.addEventListener("click", promptInstallApp);
-  updateInstallButton();
-
+  // —— PWA install: see install.js ———————————————————————————————————
+  const APP_VER = "1.0.1";
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("./service-worker.js?v=" + APP_VER).catch(() => {});
   }
-
-  // Hub can deep-link with ?install=1 to nudge the install sheet
-  try {
-    if (new URLSearchParams(location.search).get("install") === "1") {
-      const tryInstall = () => promptInstallApp();
-      window.addEventListener("beforeinstallprompt", () => setTimeout(tryInstall, 50), { once: true });
-      setTimeout(tryInstall, 700);
-    }
-  } catch (_) {}
-
   // —— Boot ————————————————————————————————————————————————————————
   buildDefaultTable();
   if (loadTable()) say("Loaded saved table", 1.0);
@@ -1547,5 +1484,7 @@
   requestAnimationFrame(frame);
 })();
 </script>
+<script>window.PWA_INSTALL = { slug: 'pinballplane', name: 'Pinball Plane' };</script>
+<script src="./install.js?v=1"></script>
 </body>
 </html>

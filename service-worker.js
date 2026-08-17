@@ -1,4 +1,4 @@
-const CACHE = "pinballplane-v1.0.0";
+const CACHE = "pinballplane-v1.0.1";
 const ASSETS = [
   "./",
   "./index.html",
@@ -6,6 +6,7 @@ const ASSETS = [
   "./icon.svg",
   "./icon-192.png",
   "./icon-512.png",
+  "./install.js",
   "./assets/themes/default/theme.json",
   "./assets/themes/default/playfield.webp",
   "./assets/themes/default/ball.png",
