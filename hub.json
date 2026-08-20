@@ -6,14 +6,33 @@
   "desc": "2D pinball built for your phone — tilt nudge, flippers, table editor, physics tweaks. Open in Chrome and Install / Add to Home Screen.",
   "accent": "#3dffa8",
   "icon": "🎮",
-  "platforms": ["android", "ios", "desktop"],
+  "iconPath": "icon.svg",
+  "platforms": [
+    "android",
+    "ios",
+    "desktop"
+  ],
   "status": "live",
   "installable": true,
   "desktopUrl": "https://azzabazza11.github.io/pinballplane/",
   "appUrl": "https://azzabazza11.github.io/pinballplane/",
-  "tags": ["game", "pinball", "tilt", "pwa", "phone"],
+  "tags": [
+    "game",
+    "pinball",
+    "tilt",
+    "pwa",
+    "phone"
+  ],
   "changelog": [
-    {"version": "1.0.1", "date": "2026-08-17", "notes": "Fix PWA install when opened from Aaron's Apps hub."},
-    {"version": "1.0.0", "date": "2026-08-14", "notes": "Make Pinball Plane installable as a mobile PWA."}
+    {
+      "version": "1.0.1",
+      "date": "2026-08-17",
+      "notes": "Fix PWA install when opened from Aaron's Apps hub."
+    },
+    {
+      "version": "1.0.0",
+      "date": "2026-08-14",
+      "notes": "Make Pinball Plane installable as a mobile PWA."
+    }
   ]
 }
